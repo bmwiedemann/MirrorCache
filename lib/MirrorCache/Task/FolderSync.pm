@@ -47,14 +47,15 @@ sub _sync {
     }
 
     my $localfiles = $app->mc->root->list_filenames($path);
+    my %localfiles = %$localfiles;
     unless ($folder) {
         $folder = $schema->resultset('Folder')->find_or_create({path => $path});
-        foreach my $file (@$localfiles) {
+        foreach my $file (sort keys %localfiles) {
             $file = $file . '/' if !$root->is_remote && $root->is_dir("$path/$file") && $path ne '/';
             $file = $file . '/' if !$root->is_remote && $root->is_dir("$path$file") && $path eq '/';
-            $schema->resultset('File')->create({folder_id => $folder->id, name => $file});
+            $schema->resultset('File')->create({folder_id => $folder->id, name => $file, size_txt => $localfiles{$file}{'size'}, dt => $localfiles{$file}{'dt'}});
         }
-        $job->note(created => $path, count => scalar(@$localfiles));
+        $job->note(created => $path, count => scalar(keys %localfiles));
 
         # Task may be explicitly scheduled for particular country or have country in the DB
         if ($folder->db_sync_for_country) {
@@ -81,14 +82,14 @@ sub _sync {
     my %dbfileidstodelete = %dbfileids;
 
     my $cnt = 0;
-    for my $file (@$localfiles) {
+    for my $file (sort keys %localfiles) {
         if ($dbfileids{$file}) {
             delete $dbfileidstodelete{$file};
             next;
         }
         $file = $file . '/' if !$root->is_remote && $root->is_dir("$path/$file") && $path ne '/';
         $file = $file . '/' if !$root->is_remote && $root->is_dir("$path$file") && $path eq '/';
-        $schema->resultset('File')->create({folder_id => $folder->id, name => $file});
+        $schema->resultset('File')->create({folder_id => $folder->id, name => $file, size_txt => $localfiles{$file}{'size'}, dt => $localfiles{$file}{'dt'} });
         $cnt = $cnt + 1;
     }
     my @idstodelete = values %dbfileidstodelete;

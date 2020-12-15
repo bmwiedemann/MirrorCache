@@ -1,6 +1,32 @@
 version: 2.1
 
 jobs:
+  unit:
+    docker:
+      - image: opensuse/leap
+    working_directory: ~/project/
+    steps:
+      - run:
+          command: |
+            zypper ar -f https://mirrorcache.opensuse.org/repositories/devel:/languages:/perl/openSUSE_Leap_15.2 perl
+            zypper --gpg-auto-import-keys ref
+            zypper -vvv -n install perl-DBIx-Class perl-Data-Dumper-Concise perl-Digest-MD5 perl-Mojolicious perl-Mojo-Pg vim \
+               curl apache2 perl-Mojolicious-Plugin-RenderFile perl-Minion perl-DateTime perl-DBIx-Class-DynamicDefault perl-DateTime-Format-Pg tidy \
+               perl-XML-Writer perl-URI \
+               git tar \
+               perl-Test-Exception
+            # zypper -n install perl-App-cpanminus perl-ExtUtils-Config perl-ExtUtils-Helpers perl-ExtUtils-InstallPaths
+            # zypper -n install gzip gcc make
+            # cpanm Mojolicious::Plugin::ClientIP --sudo || cat ~/.cpanm/work/*/build.log
+            # cpanm MaxMind::DB::Reader --sudo || :
+      - checkout:
+          path: ~/project
+      - run:
+          command: |
+            pwd
+            ls -la
+            prove -lv t/*.t
+
   environs:
     machine:
       image: ubuntu-2004:202008-01
@@ -44,5 +70,6 @@ workflows:
   version: 2.1
   test:
     jobs:
+      - unit
       - environs
       - systemd

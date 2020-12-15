@@ -11,6 +11,10 @@ pg9*/create.sh db mc_test
 pg9*/sql.sh -f $(pwd)/MirrorCache/sql/schema.sql mc_test
 
 ./environ.sh ap9-system2
+echo '<IfModule mod_autoindex.c>
+  IndexOptions FancyIndexing
+</IfModule>' >> ap9*/httpd.conf
+
 mc9*/configure_db.sh pg9
 export MIRRORCACHE_ROOT=http://$(ap9*/print_address.sh)
 

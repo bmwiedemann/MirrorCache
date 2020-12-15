@@ -60,19 +60,19 @@ sub render_file {
 sub list_filenames {
     my $self    = shift;
     my $dir     = shift;
-    return Mojo::File->new($rootpath . $dir)->list({dir => 1})->map( 'basename' )->to_array;
+    return Mojo::File->new($rootpath . $dir)->list({dir => 1})->map( 'basename' )->reduce(sub { $a->{$b} = {}; $a }, {});
 }
 
 sub _list_files {
     my $dir = shift || return [];
     my $dh = DirHandle->new($dir);
     return [] unless $dh;
-    my @children;
+    my %children;
     while ( defined( my $ent = $dh->read ) ) {
         next if $ent eq '.' or $ent eq '..';
-        push @children, Encode::decode_utf8($ent);
+        $children{Encode::decode_utf8($ent)} = { dt => undef, size => undef, };
     }
-    return [ @children ];
+    return \%children;
 }
 
 sub list_files_from_db {
@@ -120,9 +120,10 @@ sub list_files {
         ? ()
         : ( { url => '../', name => 'Parent Directory', size => '', type => '', mtime => '' } );
     my $children = _list_files($rootpath . $dir);
+    my %children = %$children;
 
     my $cur_path = Encode::decode_utf8( Mojo::Util::url_unescape( $urlpath ) );
-    for my $basename ( sort { $a cmp $b } @$children ) {
+    for my $basename ( sort keys %children ) {
         my $file = "$rootpath$dir/$basename";
         my $url  = Mojo::Path->new($cur_path)->trailing_slash(0);
         push @{ $url->parts }, $basename;

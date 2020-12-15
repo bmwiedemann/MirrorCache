@@ -18,6 +18,7 @@ package MirrorCache::WebAPI::Plugin::RootRemote;
 use Mojo::Base 'Mojolicious::Plugin';
 use Mojolicious::Types;
 use Mojo::Util ('trim');
+use Mojo::UserAgent;
 use Encode ();
 use URI::Escape ('uri_unescape');
 use File::Basename;
@@ -89,32 +90,9 @@ sub list_filenames {
     my $self    = shift;
     my $dir     = shift;
     my $tx = Mojo::UserAgent->new->get($rooturl . $dir . '/');
-    my @res = ();
-    return \@res unless $tx->result->code == 200;
+    return undef unless $tx->result->code == 200;
     my $dom = $tx->result->dom;
-    # TODO move root html tag to config
-    my @items = $dom->find('main')->each;
-    @items = $dom->find('ul')->each unless @items;
-    for my $ul (@items) {
-        for my $i ($ul->find('a')->each) {
-            my $text = trim $i->text;
-            my $href = $i->attr->{href};
-            next unless $href;
-            if ('/' eq substr($href, -1)) {
-                $href = basename($href) . '/';
-            } else {
-                $href = basename($href);
-            }
-            $href = uri_unescape($href);
-            if ($text eq $href) { # && -f $localdir . $text) {
-                # $text =~ s/\/$//;
-                push @res, $text;
-            }
-        }
-    }
-    my %hash   = map { $_, 1 } @res;
-    @res = sort keys %hash;
-    return \@res;
+    return _parse_html($dom);
 }
 
 sub _by_filename {
@@ -172,7 +150,7 @@ sub list_files {
     my $children = $self->list_filenames($dir);
 
     my $cur_path = Encode::decode_utf8( Mojo::Util::url_unescape( $urlpath) );
-    for my $basename ( sort { $a cmp $b } @$children ) {
+    for my $basename ( sort keys %$children ) {
         my $file = "$dir/$basename";
         my $furl  = Mojo::Path->new($rooturl . $cur_path)->trailing_slash(0);
         my $is_dir = (substr $file, -1) eq '/' || $self->is_dir($file);
@@ -194,9 +172,9 @@ sub list_files {
         push @files, {
             url   => $furl,
             name  => $basename,
-            size  => '?',
+            size  => $children->{$basename}{size} || '?',
             type  => $mime_type,
-            mtime => $mtime,
+            mtime => $children->{$basename}{dt} || '?',
             dir   => $is_dir,
         };
     }
@@ -207,6 +185,127 @@ sub list_files {
 sub _get_ext {
     $_[0] =~ /\.([0-9a-zA-Z]+)$/ || return;
     return lc $1;
+}
+
+sub _parse_html {
+    my $dom = shift;
+    # TODO move root html tag to config?
+    my @items;
+    my $res;
+    my @tags = qw/table ul pre/;
+    for my $i (0 .. $#tags) {
+        my $tag = $tags[$i];
+        for my $ul ($dom->find($tag)->each) {
+            if ($tag eq 'pre') {
+                $res = _parse_html_pre($ul);
+            } elsif ($tag eq 'ul') {
+                $res = _parse_html_ul($ul);
+            } elsif ($tag eq 'table') {
+                $res = _parse_html_table($ul);
+            }
+            return $res if $res;
+        }
+    }
+    return undef;
+}
+
+sub _parse_html_pre {
+    my $dom = shift;
+    my $lines = $dom->all_text;
+    my @links = $dom->find('a')->each;
+    my %res;
+    for my $link (@links) {
+        my $text = trim $link->text;
+        my $href = $link->attr->{href};
+
+        next unless $href;
+        next unless $text;
+        if ('/' eq substr($href, -1)) {
+            $href = basename($href) . '/';
+        } else {
+            $href = basename($href);
+        }
+        $href = uri_unescape($href);
+
+        next unless $text eq $href;
+        my $size = undef;
+        my $dt = undef;
+        if ($lines =~ /^\s+$text\s+([1-2][0-9]{3}-[0-1][0-9]-[0-3][0-9]\s[0-9]{2}:[0-9]{2})\s+(-|[0-9]+[KMG]?)\s*$/mi) {
+            $dt = $1;
+            $size = $2;
+        }
+        $res{$text} = { dt => $dt, size => $size };
+    }
+    return \%res;
+}
+
+sub _parse_html_table {
+    my $dom = shift;
+    my %res;
+    my $size_index = undef;
+    my $dt_index = undef;
+    my @ths = $dom->find('th')->each;
+    for my $thi (0 .. $#ths) {
+        $size_index = $thi if lc(($ths[$thi])->all_text) eq 'size';
+        $dt_index = $thi if lc(($ths[$thi])->all_text) eq 'last modified';
+    }
+    for my $tr ($dom->find('tr')->each) {
+        # try to parse header to
+        my @links = $tr->find('a')->each;
+        my $text;
+        my $href;
+        for my $link (@links) {
+            $text = trim $link->text;
+            $href = $link->attr->{href};
+
+            next unless $href;
+            next unless $text;
+            if ('/' eq substr($href, -1)) {
+                $href = basename($href) . '/';
+            } else {
+                $href = basename($href);
+            }
+            $href = uri_unescape($href);
+            last if $text eq $href;
+        }
+        next unless $text && $text eq $href;
+        my $size = undef;
+        my $dt = undef;
+        my @ths;
+        if (defined $size_index || defined $dt_index) {
+            @ths = $tr->find('td')->each;
+        }
+        $dt   = trim $ths[$dt_index]->text   if defined $dt_index;
+        $size = trim $ths[$size_index]->text if defined $size_index;
+        $res{$text} = { dt => $dt, size => $size };
+    }
+    return \%res;
+}
+
+sub _parse_html_ul {
+    my $dom = shift;
+    my $lines = $dom->all_text;
+    my @links = $dom->find('a')->each;
+    my %res = ();
+    for my $link (@links) {
+        my $text = trim $link->text;
+        my $href = $link->attr->{href};
+
+        next unless $href;
+        next unless $text;
+        if ('/' eq substr($href, -1)) {
+            $href = basename($href) . '/';
+        } else {
+            $href = basename($href);
+        }
+        $href = uri_unescape($href);
+
+        next unless $text eq $href;
+        my $size = undef;
+        my $dt = undef;
+        $res{$text} = { dt => $dt, size => $size };
+    }
+    return \%res;
 }
 
 1;

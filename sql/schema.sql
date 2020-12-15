@@ -13,8 +13,9 @@ create table folder (
 create table file (
     id bigserial primary key,
     folder_id bigint references folder,
-    name varchar(512),
-    size varchar(64),
+    name varchar(512) not null,
+    size_txt varchar(64),
+    size bigint,
     dt timestamp,
     unique(folder_id, name)
 );
